@@ -1,0 +1,811 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SR 50 từ/ngày</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans JP", sans-serif; }
+    *, *::before, *::after { box-sizing: border-box; } /* FIX overflow */
+
+    body { margin: 0; background: #0b0f14; color: #e8eef7; }
+    .wrap { max-width: 1180px; margin: 0 auto; padding: 22px; }
+    h1 { margin: 0 0 12px; font-size: 20px; }
+    .grid { display: grid; grid-template-columns: 440px 1fr; gap: 14px; }
+    @media (max-width: 1020px) { .grid { grid-template-columns: 1fr; } }
+    .card { background: #121a24; border: 1px solid #1f2a39; border-radius: 14px; padding: 14px; }
+    .meta { display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0 12px; color: #b6c4d9; }
+    .pill { background: #0f1620; border: 1px solid #243246; padding: 8px 10px; border-radius: 999px; }
+
+    input, textarea, select, button {
+      border-radius: 12px; border: 1px solid #243246; background: #0f1620; color: #e8eef7;
+      padding: 11px 12px; font-size: 14px; outline: none;
+      max-width: 100%;
+    }
+    textarea { width: 100%; min-height: 160px; resize: vertical; line-height: 1.35; }
+    input::placeholder, textarea::placeholder { color: #91a2ba; }
+    button { cursor: pointer; background: #1a2a40; border-color: #2a3b56; font-weight: 750; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+    .small { color: #b6c4d9; font-size: 13px; margin-top: 10px; line-height: 1.35; }
+    .ok { color: #9ee6b8; }
+    .warn { color: #ffd59a; }
+    .err { color: #ffb3b3; }
+    .sep { height: 1px; background: #1f2a39; margin: 12px 0; }
+    .kicker{ font-size:12px; color:#b6c4d9; }
+    .muted{ color:#93a7c2; }
+
+    .headbar{
+      display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+      margin: 0 0 10px;
+    }
+    .schedule{
+      background:#0f1620; border:1px solid #243246; border-radius:12px;
+      padding: 10px 12px; color:#c8d6ea; font-size: 13px;
+    }
+    .schedule b { color:#e8eef7; }
+
+    .tableWrap{
+      overflow:auto; border:1px solid #1f2a39; border-radius: 12px; background:#0f1620;
+      max-height: 72vh;
+    }
+    table{ width:100%; border-collapse: collapse; min-width: 1180px; }
+    thead th{
+      position: sticky; top: 0; z-index: 3;
+      background:#101a27; border-bottom:1px solid #1f2a39;
+      padding: 10px; text-align:left; font-size: 13px;
+      white-space: nowrap;
+    }
+    tbody td{
+      border-top:1px solid #1a2535; padding: 10px; font-size: 13px; vertical-align: top;
+    }
+    tbody td.blank{ height: 46px; } /* preview giống in: ô viết to */
+
+    .historyWrap{
+      overflow:auto; border:1px solid #1f2a39; border-radius: 12px; background:#0f1620;
+      max-height: 240px; margin-top: 10px;
+    }
+    .historyTable{ min-width: 100%; }
+    .historyTable thead th{ position: sticky; top: 0; }
+
+    .danger {
+      background: #3a1a1a;
+      border-color: #5a2a2a;
+    }
+
+    /* tiny buttons in table */
+    .btnMini{
+      padding: 8px 10px;
+      font-size: 12px;
+      border-radius: 10px;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Spaced Repetition — 50 từ mới/ngày + trộn ôn thông minh</h1>
+
+  <div class="grid">
+    <!-- LEFT -->
+    <div class="card">
+      <div class="meta">
+        <div class="pill" id="todayPill"></div>
+        <div class="pill" id="countPill"></div>
+        <div class="pill" id="duePill"></div>
+        <div class="pill" id="weekPill"></div>
+        <div class="pill" id="totalPill"></div>
+      </div>
+
+      <div style="font-weight:800; margin-bottom:8px;">Nhập nhanh (dán nhiều dòng)</div>
+      <div class="kicker">
+        Mỗi dòng: <b>Từ vựng</b> [TAB hoặc | hoặc ,] <b>Kana</b> [TAB hoặc | hoặc ,] <b>Nghĩa Việt</b><br>
+        Ví dụ: <span class="muted">食べる | たべる | ăn</span>
+      </div>
+      <textarea id="bulkText" placeholder="Dán danh sách 50 từ ở đây..."></textarea>
+      <div class="actions">
+        <button id="bulkAddBtn" type="button">Thêm hàng loạt</button>
+        <button id="bulkClearBtn" type="button">Xóa ô nhập</button>
+      </div>
+
+      <!-- NEW: START TIME -->
+      <div class="sep"></div>
+      <div style="font-weight:800; margin-bottom:6px;">Giờ bắt đầu học hôm nay (tùy chọn)</div>
+      <div class="kicker">
+        Nếu chọn, hệ thống tự tạo 5 mốc ngắt quãng theo giờ bắt đầu: <b>0h · +3h · +6h · +10h · +14h</b>.<br>
+        Nếu không chọn, dùng mốc cố định: <span class="muted">08:00 · 11:00 · 14:00 · 18:00 · 22:00</span>.
+      </div>
+      <div class="actions" style="margin-top:10px;">
+        <input id="startTimeInput" type="time" step="60" style="flex:1; min-width: 160px;">
+        <button id="applyStartTimeBtn" type="button">Áp dụng cho hôm nay</button>
+        <button id="resetStartTimeBtn" type="button">Về mặc định</button>
+      </div>
+      <div class="kicker muted" id="startTimeHint" style="margin-top:6px;"></div>
+
+      <div class="actions" style="margin-top:12px;">
+        <button id="genBtn" type="button">Tạo file kiểm tra hôm nay</button>
+      </div>
+
+      <div class="small" id="msg"></div>
+
+      <div class="sep"></div>
+
+      <div style="font-weight:800;">Kho lưu trữ lịch sử (xem lại theo ngày)</div>
+      <div class="kicker" style="margin-top:6px;">Chọn ngày để xem danh sách từ đã nhập hôm đó (có thể sửa/xóa từng từ).</div>
+      <select id="historyDateSelect" style="width:100%; margin-top:10px;"></select>
+      <div class="historyWrap">
+        <table class="historyTable">
+          <thead>
+            <tr>
+              <th style="width:28%;">Từ vựng</th>
+              <th style="width:28%;">Kana</th>
+              <th style="width:34%;">Nghĩa Việt</th>
+              <th style="width:10%;">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+      </div>
+
+      <div class="actions" style="margin-top:10px;">
+        <button id="clearLocalBtn" class="danger" type="button">Xóa dữ liệu local</button>
+      </div>
+      <div class="kicker muted" style="margin-top:6px;">
+        (Sẽ xóa toàn bộ lịch sử trên máy này và reset logic SR.)
+      </div>
+    </div>
+
+    <!-- RIGHT -->
+    <div class="card">
+      <div class="headbar">
+        <div style="font-weight:800;">Xem trước bảng in (live — hôm nay)</div>
+        <div class="schedule" id="scheduleHeader"></div>
+      </div>
+
+      <div class="tableWrap">
+        <table>
+          <thead>
+            <tr id="previewHeadRow"></tr>
+          </thead>
+          <tbody id="previewBody"></tbody>
+        </table>
+      </div>
+
+      <div class="small muted" style="margin-top:10px;">
+        Thứ tự trộn ổn định theo ngày (preview = in). Logic: New + Due + (ngày thứ 7 ôn lại 7 ngày gần nhất).
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ======= CẤU HÌNH =======
+  const TZ = "Asia/Bangkok";
+  const DAILY_NEW_LIMIT = 50;
+
+  // mốc mặc định (GIỮ NGUYÊN như cũ)
+  const DEFAULT_DAILY_CYCLE = ["08:00", "11:00", "14:00", "18:00", "22:00"];
+
+  // giữ nhịp cũ theo khoảng cách: 0h, +3h, +6h, +10h, +14h
+  const CYCLE_OFFSETS_MIN = [0, 180, 360, 600, 840];
+
+  // cột viết = 1 (Học mới) + 5 (giờ)
+  const BLANK_COLS = 1 + DEFAULT_DAILY_CYCLE.length;
+
+  // khoảng SR (tăng dần theo số lần "Tạo file" chứa từ đó)
+  const INTERVALS_DAYS = [1, 2, 4, 7, 14, 30, 60, 120];
+
+  // ======= TIỆN ÍCH NGÀY =======
+  const todayStr = () => new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit"
+  }).format(new Date());
+
+  const ymdToDay = (ymd) => {
+    const [y,m,d] = ymd.split("-").map(Number);
+    return Math.floor(Date.UTC(y, m-1, d) / 86400000);
+  };
+  const dayToYmd = (day) => new Date(day * 86400000).toISOString().slice(0,10);
+  const addDays = (ymd, delta) => dayToYmd(ymdToDay(ymd) + delta);
+
+  const timeToMin = (hhmm) => {
+    const [h,m] = (hhmm || "00:00").split(":").map(Number);
+    return (h*60 + m) || 0;
+  };
+  const minToHHMM = (min) => {
+    const mm = ((min % 1440) + 1440) % 1440;
+    const h = Math.floor(mm/60);
+    const m = mm % 60;
+    return String(h).padStart(2,"0") + ":" + String(m).padStart(2,"0");
+  };
+
+  // ======= RNG ỔN ĐỊNH (preview == print) =======
+  function xmur3(str) {
+    let h = 1779033703 ^ str.length;
+    for (let i = 0; i < str.length; i++) {
+      h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+      h = (h << 13) | (h >>> 19);
+    }
+    return function() {
+      h = Math.imul(h ^ (h >>> 16), 2246822507);
+      h = Math.imul(h ^ (h >>> 13), 3266489909);
+      return (h ^= (h >>> 16)) >>> 0;
+    };
+  }
+  const orderKey = (seed, id) => xmur3(seed + "::" + id)();
+
+  // ======= LƯU TRỮ =======
+  const KEY = "sr_50_v2";
+  const defaultState = () => ({
+    startDate: null,
+    lastGeneratedDate: null,
+    words: [],
+    settings: { cycleStartByDate: {} } // NEW (không ảnh hưởng SR)
+  });
+
+  const load = () => {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (!raw) return defaultState();
+      const s = JSON.parse(raw);
+      if (!s.words) s.words = [];
+      if (!s.settings) s.settings = { cycleStartByDate: {} };
+      if (!s.settings.cycleStartByDate) s.settings.cycleStartByDate = {};
+      return s;
+    } catch {
+      return defaultState();
+    }
+  };
+  const save = (s) => localStorage.setItem(KEY, JSON.stringify(s));
+
+  let state = load();
+
+  // ======= LOGIC SR (GIỮ NGUYÊN) =======
+  const normalizeWord = (w) => {
+    if (w.stage == null) w.stage = 0;
+    if (!w.nextDue) w.nextDue = w.addedDate;
+    if (!w.lastSeen) w.lastSeen = null;
+    return w;
+  };
+
+  const countNewOnDate = (d) => state.words.filter(w => w.addedDate === d).length;
+
+  const recomputeStartDate = () => {
+    if (state.words.length === 0) { state.startDate = null; return; }
+    const minDay = Math.min(...state.words.map(w => ymdToDay(w.addedDate)));
+    state.startDate = dayToYmd(minDay);
+  };
+
+  const isWeeklyReviewDay = (t) => {
+    if (!state.startDate) return false;
+    const idx = (ymdToDay(t) - ymdToDay(state.startDate)) + 1;
+    return idx % 7 === 0;
+  };
+
+  const dueCountOnDate = (t) => {
+    const tDay = ymdToDay(t);
+    return state.words.filter(w => {
+      normalizeWord(w);
+      return w.addedDate !== t && ymdToDay(w.nextDue) <= tDay;
+    }).length;
+  };
+
+  // Pool hôm nay: New + Due + (weekly-7days on day7). Trộn ổn định theo ngày.
+  const buildTodayPool = (t) => {
+    const tDay = ymdToDay(t);
+
+    const todayNew = state.words
+      .filter(w => w.addedDate === t)
+      .map(normalizeWord);
+
+    const due = state.words
+      .filter(w => {
+        normalizeWord(w);
+        return w.addedDate !== t && ymdToDay(w.nextDue) <= tDay;
+      })
+      .map(normalizeWord);
+
+    let weekly = [];
+    if (isWeeklyReviewDay(t)) {
+      const start = tDay - 6;
+      weekly = state.words
+        .filter(w => {
+          normalizeWord(w);
+          const d = ymdToDay(w.addedDate);
+          return d >= start && d <= tDay;
+        })
+        .map(normalizeWord);
+    }
+
+    const map = new Map();
+    for (const w of [...todayNew, ...due, ...weekly]) map.set(w.id, w);
+
+    const all = Array.from(map.values());
+    const setTodayNew = new Set(todayNew.map(w => w.id));
+    const newBucket = all.filter(w => setTodayNew.has(w.id));
+    const revBucket = all.filter(w => !setTodayNew.has(w.id));
+
+    const seed = "seed:" + t;
+    newBucket.sort((a,b)=> orderKey(seed, a.id) - orderKey(seed, b.id));
+    revBucket.sort((a,b)=> orderKey(seed, a.id) - orderKey(seed, b.id));
+
+    // weave: review trước, xen kẽ new
+    const mixed = [];
+    let iN=0, iR=0;
+    while (iN < newBucket.length || iR < revBucket.length) {
+      if (iR < revBucket.length) mixed.push(revBucket[iR++]);
+      if (iN < newBucket.length) mixed.push(newBucket[iN++]);
+    }
+
+    return { list: mixed, newCount: todayNew.length, revCount: revBucket.length };
+  };
+
+  // Khi tạo file => coi như “đã ôn chính thức”
+  const advanceSchedule = (word, t) => {
+    const tDay = ymdToDay(t);
+    const dueDay = ymdToDay(word.nextDue);
+
+    const late = Math.max(0, tDay - dueDay);
+    if (late >= 7 && word.stage >= 2) word.stage -= 1;
+
+    word.stage = Math.min((word.stage ?? 0) + 1, INTERVALS_DAYS.length);
+    const idx = Math.min(word.stage - 1, INTERVALS_DAYS.length - 1);
+    word.nextDue = addDays(t, INTERVALS_DAYS[idx]);
+    word.lastSeen = t;
+  };
+
+  // ======= DAILY CYCLE (NEW, KHÔNG ĐỤNG SR) =======
+  const getCycleStartForDate = (t) => state.settings?.cycleStartByDate?.[t] || null;
+
+  const buildCycleFromStart = (startHHMM) => {
+    const startMin = timeToMin(startHHMM);
+    return CYCLE_OFFSETS_MIN.map(off => {
+      const total = startMin + off;
+      const dayPlus = Math.floor(total / 1440);
+      const label = minToHHMM(total);
+      return dayPlus ? `${label}(+${dayPlus})` : label;
+    });
+  };
+
+  const getDailyCycle = (t) => {
+    const s = getCycleStartForDate(t);
+    if (!s) return DEFAULT_DAILY_CYCLE.slice();
+    return buildCycleFromStart(s);
+  };
+
+  // ======= IN/PRINT (CỘT VIẾT RỘNG HƠN) =======
+  const escapeHtml = (s) => (s ?? "").toString()
+    .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;").replaceAll("'","&#039;");
+
+  const openPrintWindow = (t, list, cycle) => {
+    const title = `Bài kiểm tra - ${t}`;
+    const scheduleText = `Chu kỳ ngắt quãng hôm nay: ${cycle.join(" · ")}`;
+
+    const headCells = [
+      "<th>Từ vựng</th>",
+      "<th>Kana</th>",
+      "<th>Nghĩa Việt</th>",
+      "<th>Học mới</th>",
+      ...cycle.map(h => `<th>${escapeHtml(h)}</th>`)
+    ].join("");
+
+    const rows = list.map(w => {
+      const blanks = Array.from({length: BLANK_COLS}, ()=>"<td></td>").join("");
+      return `<tr>
+        <td>${escapeHtml(w.vocab)}</td>
+        <td>${escapeHtml(w.kana)}</td>
+        <td>${escapeHtml(w.meaning)}</td>
+        ${blanks}
+      </tr>`;
+    }).join("");
+
+    // Widths (blank 6 cột * 10% = 60%)
+    const html = `<!doctype html>
+<html lang="vi"><head><meta charset="utf-8" />
+<title>${escapeHtml(title)}</title>
+<style>
+  :root { font-family: Arial, "Noto Sans JP", sans-serif; font-size: 11px; }
+  @page { size: A4 landscape; margin: 10mm; }
+  h1 { margin: 0 0 4mm; font-size: 16px; }
+  .headerline{
+    margin: 0 0 4mm; font-size: 12px; padding: 8px 10px;
+    border: 1px solid #000; border-radius: 8px;
+  }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td { border: 1px solid #000; padding: 6px; vertical-align: top; }
+  th { font-weight: 700; }
+  td { height: 60px; }
+  .btn { margin-bottom: 6mm; }
+  @media print { .btn { display: none; } }
+</style>
+</head>
+<body>
+  <button class="btn" onclick="window.print()">In / Lưu PDF</button>
+  <h1>${escapeHtml(title)}</h1>
+  <div class="headerline"><b>${escapeHtml(scheduleText)}</b> • Tổng số từ: ${list.length}</div>
+
+  <table>
+    <colgroup>
+      <col style="width:12%;">
+      <col style="width:10%;">
+      <col style="width:18%;">
+      <col style="width:10%;">
+      <col style="width:10%;">
+      <col style="width:10%;">
+      <col style="width:10%;">
+      <col style="width:10%;">
+      <col style="width:10%;">
+    </colgroup>
+    <thead><tr>${headCells}</tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+</body></html>`;
+
+    const w = window.open("", "_blank");
+    if (!w) return false;
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    return true;
+  };
+
+  // ======= UI =======
+  const todayPill = document.getElementById("todayPill");
+  const countPill = document.getElementById("countPill");
+  const duePill   = document.getElementById("duePill");
+  const weekPill  = document.getElementById("weekPill");
+  const totalPill = document.getElementById("totalPill");
+  const scheduleHeader = document.getElementById("scheduleHeader");
+  const previewHeadRow = document.getElementById("previewHeadRow");
+  const previewBody = document.getElementById("previewBody");
+
+  const bulkText = document.getElementById("bulkText");
+  const bulkAddBtn = document.getElementById("bulkAddBtn");
+  const bulkClearBtn = document.getElementById("bulkClearBtn");
+  const genBtn = document.getElementById("genBtn");
+  const msg = document.getElementById("msg");
+
+  const startTimeInput = document.getElementById("startTimeInput");
+  const applyStartTimeBtn = document.getElementById("applyStartTimeBtn");
+  const resetStartTimeBtn = document.getElementById("resetStartTimeBtn");
+  const startTimeHint = document.getElementById("startTimeHint");
+
+  const historyDateSelect = document.getElementById("historyDateSelect");
+  const historyBody = document.getElementById("historyBody");
+  const clearLocalBtn = document.getElementById("clearLocalBtn");
+
+  // ======= PREVIEW HEADER/ROWS =======
+  const renderPreviewHeader = (cycle) => {
+    const ths = [
+      `<th style="width:12%;">Từ vựng</th>`,
+      `<th style="width:10%;">Kana</th>`,
+      `<th style="width:18%;">Nghĩa Việt</th>`,
+      `<th style="width:10%;">Học mới</th>`,
+      ...cycle.map(h => `<th style="width:10%;">${escapeHtml(h)}</th>`)
+    ];
+    previewHeadRow.innerHTML = ths.join("");
+  };
+
+  const renderPreview = (t, cycle) => {
+    const pool = buildTodayPool(t);
+    const list = pool.list;
+
+    if (list.length === 0) {
+      previewBody.innerHTML = `<tr><td colspan="${4 + cycle.length}" class="muted">Chưa có từ nào để hiển thị.</td></tr>`;
+      return;
+    }
+
+    previewBody.innerHTML = list.map(w => {
+      const blanks = Array.from({length: BLANK_COLS}, ()=>`<td class="blank"></td>`).join("");
+      return `<tr>
+        <td>${escapeHtml(w.vocab)}</td>
+        <td>${escapeHtml(w.kana)}</td>
+        <td>${escapeHtml(w.meaning)}</td>
+        ${blanks}
+      </tr>`;
+    }).join("");
+  };
+
+  // ======= HISTORY (NEW: EDIT/DELETE) =======
+  let editingId = null;
+
+  const getAllDatesDesc = () => {
+    const set = new Set(state.words.map(w => w.addedDate));
+    return Array.from(set).sort((a,b)=> ymdToDay(b) - ymdToDay(a));
+  };
+
+  const renderHistorySelect = () => {
+    const dates = getAllDatesDesc();
+    if (dates.length === 0) {
+      historyDateSelect.innerHTML = `<option value="">(Chưa có dữ liệu)</option>`;
+      historyBody.innerHTML = `<tr><td colspan="4" class="muted">Chưa có từ nào được lưu.</td></tr>`;
+      return;
+    }
+    const current = historyDateSelect.value || dates[0];
+    historyDateSelect.innerHTML = dates.map(d => {
+      const n = countNewOnDate(d);
+      return `<option value="${d}" ${d===current?"selected":""}>${d} — ${n} từ</option>`;
+    }).join("");
+    renderHistoryTable(historyDateSelect.value || dates[0]);
+  };
+
+  const renderHistoryTable = (d) => {
+    const rows = state.words
+      .filter(w => w.addedDate === d)
+      .map(normalizeWord);
+
+    if (rows.length === 0) {
+      historyBody.innerHTML = `<tr><td colspan="4" class="muted">Không có từ nào trong ngày này.</td></tr>`;
+      return;
+    }
+
+    historyBody.innerHTML = rows.map(w => {
+      const isEdit = editingId === w.id;
+
+      if (isEdit) {
+        return `
+          <tr data-id="${escapeHtml(w.id)}">
+            <td><input class="editVocab" value="${escapeHtml(w.vocab)}" /></td>
+            <td><input class="editKana" value="${escapeHtml(w.kana)}" /></td>
+            <td><input class="editMeaning" value="${escapeHtml(w.meaning)}" /></td>
+            <td>
+              <button class="btnMini" data-action="save" data-id="${escapeHtml(w.id)}">Lưu</button>
+              <button class="btnMini" data-action="cancel" data-id="${escapeHtml(w.id)}">Hủy</button>
+            </td>
+          </tr>
+        `;
+      }
+
+      return `
+        <tr data-id="${escapeHtml(w.id)}">
+          <td>${escapeHtml(w.vocab)}</td>
+          <td>${escapeHtml(w.kana)}</td>
+          <td>${escapeHtml(w.meaning)}</td>
+          <td>
+            <button class="btnMini" data-action="edit" data-id="${escapeHtml(w.id)}">Sửa</button>
+            <button class="btnMini danger" data-action="delete" data-id="${escapeHtml(w.id)}">Xóa</button>
+          </td>
+        </tr>
+      `;
+    }).join("");
+  };
+
+  historyDateSelect.addEventListener("change", () => {
+    editingId = null;
+    renderHistoryTable(historyDateSelect.value);
+  });
+
+  historyBody.addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+
+    const action = btn.dataset.action;
+    const id = btn.dataset.id;
+    const d = historyDateSelect.value;
+
+    if (!id) return;
+
+    if (action === "edit") {
+      editingId = id;
+      renderHistoryTable(d);
+      return;
+    }
+
+    if (action === "cancel") {
+      editingId = null;
+      renderHistoryTable(d);
+      return;
+    }
+
+    if (action === "save") {
+      const tr = btn.closest("tr");
+      const vocab = tr.querySelector(".editVocab")?.value?.trim() ?? "";
+      const kana = tr.querySelector(".editKana")?.value?.trim() ?? "";
+      const meaning = tr.querySelector(".editMeaning")?.value?.trim() ?? "";
+
+      if (!vocab || !kana || !meaning) {
+        msg.innerHTML = `<span class="err">Không được để trống khi lưu chỉnh sửa.</span>`;
+        return;
+      }
+
+      const w = state.words.find(x => x.id === id);
+      if (!w) return;
+
+      w.vocab = vocab;
+      w.kana = kana;
+      w.meaning = meaning;
+
+      save(state);
+      editingId = null;
+      render(); // update preview + history
+      msg.innerHTML = `<span class="ok">Đã lưu chỉnh sửa.</span>`;
+      return;
+    }
+
+    if (action === "delete") {
+      const ok = window.confirm("Xóa từ này khỏi local? (Không thể hoàn tác)");
+      if (!ok) return;
+
+      state.words = state.words.filter(x => x.id !== id);
+      if (editingId === id) editingId = null;
+
+      recomputeStartDate();
+      save(state);
+      render();
+      msg.innerHTML = `<span class="ok">Đã xóa 1 từ.</span>`;
+      return;
+    }
+  });
+
+  // ======= CLEAR LOCAL (RESET LOGIC NGAY) =======
+  clearLocalBtn.addEventListener("click", () => {
+    const ok = window.confirm("Xóa toàn bộ dữ liệu local trên máy này? (Không thể hoàn tác)");
+    if (!ok) return;
+    localStorage.removeItem(KEY);
+    state = defaultState();
+    bulkText.value = "";
+    msg.innerHTML = `<span class="ok">Đã xóa dữ liệu local và reset toàn bộ hệ thống.</span>`;
+    render();
+  });
+
+  // ======= BULK INPUT =======
+  const parseLines = (text) => {
+    const lines = text.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+    const items = [];
+    for (const line of lines) {
+      const parts = line.split(/\t|\s*\|\s*|\s*,\s*/).map(x=>x.trim()).filter(Boolean);
+      if (parts.length >= 3) {
+        const [v,k,m] = parts;
+        items.push({vocab:v, kana:k, meaning:m});
+      }
+    }
+    return items;
+  };
+
+  bulkClearBtn.addEventListener("click", () => {
+    bulkText.value = "";
+    bulkText.focus();
+  });
+
+  bulkAddBtn.addEventListener("click", () => {
+    const t = todayStr();
+    let remaining = DAILY_NEW_LIMIT - countNewOnDate(t);
+    if (remaining <= 0) return;
+
+    const items = parseLines(bulkText.value);
+    if (items.length === 0) {
+      msg.innerHTML = `<span class="err">Không parse được dòng nào. Hãy dùng TAB hoặc | hoặc , để tách 3 cột.</span>`;
+      return;
+    }
+
+    if (!state.startDate) state.startDate = t;
+
+    let added = 0;
+    for (const it of items) {
+      if (remaining <= 0) break;
+
+      const id = crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2);
+      state.words.push({
+        id,
+        vocab: it.vocab,
+        kana: it.kana,
+        meaning: it.meaning,
+        addedDate: t,
+        stage: 0,
+        nextDue: t,
+        lastSeen: null
+      });
+
+      remaining--;
+      added++;
+    }
+
+    recomputeStartDate();
+    save(state);
+
+    // NEW: tự xóa ô nhập sau khi thêm hàng loạt
+    bulkText.value = "";
+
+    msg.innerHTML = `<span class="ok">Đã thêm ${added} từ (còn thiếu ${DAILY_NEW_LIMIT - countNewOnDate(t)} từ để đủ 50).</span>`;
+    render();
+  });
+
+  // ======= START TIME BUTTONS (NEW) =======
+  applyStartTimeBtn.addEventListener("click", () => {
+    const t = todayStr();
+    const v = (startTimeInput.value || "").trim();
+    if (!v) {
+      msg.innerHTML = `<span class="err">Bạn chưa chọn giờ bắt đầu.</span>`;
+      return;
+    }
+    state.settings.cycleStartByDate[t] = v;
+    save(state);
+    render();
+    msg.innerHTML = `<span class="ok">Đã áp dụng giờ bắt đầu hôm nay: ${escapeHtml(v)}.</span>`;
+  });
+
+  resetStartTimeBtn.addEventListener("click", () => {
+    const t = todayStr();
+    if (state.settings?.cycleStartByDate?.[t]) delete state.settings.cycleStartByDate[t];
+    save(state);
+    render();
+    msg.innerHTML = `<span class="ok">Đã về mốc cố định mặc định.</span>`;
+  });
+
+  // ======= GENERATE =======
+  genBtn.addEventListener("click", () => {
+    const t = todayStr();
+    const newCount = countNewOnDate(t);
+    if (newCount < DAILY_NEW_LIMIT) return;
+    if (state.lastGeneratedDate === t) return;
+
+    const pool = buildTodayPool(t);
+    const list = pool.list;
+
+    const cycle = getDailyCycle(t);
+
+    const ok = openPrintWindow(t, list, cycle);
+    if (!ok) {
+      msg.innerHTML = `<span class="err">Trình duyệt chặn pop-up. Hãy cho phép pop-up rồi bấm lại.</span>`;
+      return;
+    }
+
+    const ids = new Set(list.map(w => w.id));
+    for (const w of state.words) {
+      normalizeWord(w);
+      if (ids.has(w.id)) advanceSchedule(w, t);
+    }
+
+    state.lastGeneratedDate = t;
+    save(state);
+    render();
+  });
+
+  // ======= RENDER =======
+  const render = () => {
+    recomputeStartDate();
+
+    const t = todayStr();
+    const newCount = countNewOnDate(t);
+    const dueCount = dueCountOnDate(t);
+    const pool = buildTodayPool(t);
+
+    const cycle = getDailyCycle(t);
+
+    todayPill.textContent = `Hôm nay: ${t}`;
+    countPill.textContent = `Từ mới hôm nay: ${newCount}/${DAILY_NEW_LIMIT}`;
+    duePill.textContent = `Đến hạn hôm nay: ${dueCount}`;
+    weekPill.textContent = isWeeklyReviewDay(t) ? "Hôm nay là ngày ôn tổng 7 ngày" : "Ngày thường";
+    totalPill.textContent = `Tổng từ đã lưu: ${state.words.length}`;
+
+    bulkAddBtn.disabled = newCount >= DAILY_NEW_LIMIT;
+    genBtn.disabled = !(newCount >= DAILY_NEW_LIMIT && state.lastGeneratedDate !== t);
+
+    // Start time UI sync
+    const start = getCycleStartForDate(t);
+    startTimeInput.value = start || "";
+    startTimeHint.textContent = start
+      ? `Đang dùng giờ bắt đầu hôm nay: ${start} → mốc: ${cycle.join(" · ")}`
+      : `Đang dùng mốc cố định: ${DEFAULT_DAILY_CYCLE.join(" · ")}`;
+
+    scheduleHeader.innerHTML = `<b>Chu kỳ ngắt quãng:</b> ${cycle.map(escapeHtml).join(" · ")}`;
+
+    if (newCount < DAILY_NEW_LIMIT) {
+      msg.innerHTML = `<span class="warn">Bắt buộc nhập đủ ${DAILY_NEW_LIMIT} từ mới trong ngày để được tạo file.</span>`;
+    } else if (state.lastGeneratedDate === t) {
+      msg.innerHTML = `<span class="ok">Đã tạo file kiểm tra cho hôm nay (lịch ôn đã cập nhật theo SR).</span>`;
+    } else {
+      msg.innerHTML = `<span class="ok">Đã đủ ${DAILY_NEW_LIMIT} từ mới. Bảng hôm nay trộn: mới ${pool.newCount} • ôn ${pool.revCount}.</span>`;
+    }
+
+    renderPreviewHeader(cycle);
+    renderPreview(t, cycle);
+    renderHistorySelect();
+  };
+
+  render();
+})();
+</script>
+</body>
+</html>
