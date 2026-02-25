@@ -43,6 +43,7 @@
     .schedule{
       background:#0f1620; border:1px solid #243246; border-radius:12px;
       padding: 10px 12px; color:#c8d6ea; font-size: 13px;
+      white-space: nowrap;
     }
     .schedule b { color:#e8eef7; }
 
@@ -90,6 +91,22 @@
       color: #93a7c2;
       margin-left: 4px;
     }
+
+    /* Pagination UI */
+    .pager{
+      display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+      background:#0f1620; border:1px solid #243246; border-radius: 12px;
+      padding: 8px 10px;
+    }
+    .pager .info{
+      font-size: 12px; color:#b6c4d9;
+      white-space: nowrap;
+    }
+    .pager select{
+      padding: 8px 10px;
+      font-size: 12px;
+      border-radius: 10px;
+    }
   </style>
 </head>
 
@@ -111,7 +128,7 @@
 
       <div id="reviewNotice" class="kicker warn" style="display:none; margin: 8px 0 10px;"></div>
 
-      <!-- BULK SECTION (ẩn ở ngày tổng ôn 7/21) -->
+      <!-- BULK SECTION (ẩn ở ngày tổng ôn 7/21 hoặc khi đang bắt nợ) -->
       <div id="bulkSection">
         <div style="font-weight:800; margin-bottom:8px;">Nhập nhanh (dán nhiều dòng)</div>
         <div class="kicker">
@@ -141,7 +158,7 @@
       <div class="kicker muted" id="startTimeHint" style="margin-top:6px;"></div>
 
       <div class="actions" style="margin-top:12px;">
-        <button id="genBtn" type="button">Tạo file kiểm tra hôm nay</button>
+        <button id="genBtn" type="button">Tạo file kiểm tra</button>
       </div>
 
       <div class="actions" id="resultActions" style="margin-top:10px; display:none;">
@@ -173,7 +190,14 @@
         </table>
       </div>
 
-      <div class="actions" style="margin-top:10px;">
+      <div class="actions" style="margin-top:10px; justify-content:space-between; align-items:center;">
+        <div class="pager" id="historyPager" style="display:none;">
+          <button id="historyPrevBtn" class="btnMini" type="button">◀</button>
+          <span class="info" id="historyPageInfo"></span>
+          <button id="historyNextBtn" class="btnMini" type="button">▶</button>
+          <select id="historyPageSelect" class="btnMini" title="Đi tới trang"></select>
+        </div>
+
         <button id="clearLocalBtn" class="danger" type="button">Xóa dữ liệu local</button>
       </div>
       <div class="kicker muted" style="margin-top:6px;">
@@ -184,8 +208,18 @@
     <!-- RIGHT -->
     <div class="card">
       <div class="headbar">
-        <div style="font-weight:800;">Xem trước bảng in (live — hôm nay)</div>
-        <div class="schedule" id="scheduleHeader"></div>
+        <div style="font-weight:800;">Xem trước bảng in (theo trang)</div>
+
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+          <div class="schedule" id="scheduleHeader"></div>
+
+          <div class="pager" id="previewPager" style="display:none;">
+            <button id="previewPrevBtn" class="btnMini" type="button">◀</button>
+            <span class="info" id="previewPageInfo"></span>
+            <button id="previewNextBtn" class="btnMini" type="button">▶</button>
+            <select id="previewPageSelect" class="btnMini" title="Đi tới trang"></select>
+          </div>
+        </div>
       </div>
 
       <div class="tableWrap">
@@ -213,12 +247,16 @@
 
   // Review days
   const WEEKLY_EVERY_DAYS = 7;   // tổng ôn 7 ngày
-  const WEEKLY_WINDOW_DAYS = 7;  // lấy 7 ngày gần nhất (bao gồm hôm nay)
-  const TRI_EVERY_DAYS = 21;     // tổng ôn 21 ngày (cộng dồn từ startDate đến hôm nay)
+  const WEEKLY_WINDOW_DAYS = 7;  // lấy 7 ngày gần nhất (bao gồm hôm đó)
+  const TRI_EVERY_DAYS = 21;     // tổng ôn 21 ngày (cộng dồn từ startDate đến ngày đó)
 
   // Weak boosters
   const WEAK_DAILY_LIMIT = 20;   // ngày thường
   const WEAK_WEEKLY_LIMIT = 30;  // ngày tổng ôn 7 ngày
+
+  // Pagination
+  const PREVIEW_PAGE_SIZE = 100; // preview 100 từ/trang
+  const HISTORY_PAGE_SIZE = 50;  // history 50 từ/trang
 
   // mốc mặc định
   const DEFAULT_DAILY_CYCLE = ["08:00", "11:00", "14:00", "18:00", "22:00"];
@@ -278,11 +316,13 @@
     "sr_50_v2"
   ];
 
+  // CHỈ THÊM 1 STATE LIÊN QUAN: pendingReviewQueue (bắt nợ review 7/21)
   const defaultState = () => ({
     startDate: null,
     words: [],
     settings: { cycleStartByDate: {} },
-    generatedByDate: {}
+    generatedByDate: {},
+    pendingReviewQueue: [] // ["YYYY-MM-DD", ...] (ngày review còn nợ, tăng dần)
   });
 
   const tryLoad = (k) => {
@@ -304,6 +344,7 @@
     if (!s.settings) s.settings = { cycleStartByDate: {} };
     if (!s.settings.cycleStartByDate) s.settings.cycleStartByDate = {};
     if (!s.generatedByDate) s.generatedByDate = {};
+    if (!Array.isArray(s.pendingReviewQueue)) s.pendingReviewQueue = [];
     return s;
   };
 
@@ -399,6 +440,11 @@
     return m === "weekly" || m === "tri";
   };
 
+  const modeLabel = (m) =>
+    m === "tri" ? "TỔNG ÔN 21 (ôn hết tất cả)" :
+    m === "weekly" ? "TỔNG ÔN 7" :
+    "Ngày thường";
+
   // ======= COUNTS =======
   const countNewOnDate = (d) => state.words.filter(w => w.addedDate === d).length;
 
@@ -469,7 +515,7 @@
         });
     }
 
-    // TRI: tổng ôn “hết tất cả từ” = cộng dồn từ startDate đến hôm nay
+    // TRI: tổng ôn “hết tất cả từ” = cộng dồn từ startDate đến ngày đó
     let triPack = [];
     if (tri) {
       const startDay = state.startDate ? ymdToDay(state.startDate) : tDay;
@@ -560,8 +606,8 @@
     return `${base} <sup class="createdDate">${escapeHtml(w.addedDate)}</sup>`;
   };
 
-  const openPrintWindow = (t, list, cycle, note = "", showCreatedDate = false) => {
-    const title = `Bài kiểm tra - ${t}`;
+  const openPrintWindow = (titleDate, list, cycle, note = "", showCreatedDate = false) => {
+    const title = `Bài kiểm tra - ${titleDate}`;
     const scheduleText = `Chu kỳ ngắt quãng: ${cycle.join(" · ")}`;
     const blankCount = 1 + cycle.length;
 
@@ -588,9 +634,7 @@
     const blankW = remain / blankCount;
 
     const colgroup = `
-      <col style="width:${vocabW}%;">
-      <col style="width:${kanaW}%;">
-      <col style="width:${meaningW}%;">
+      <col style="width:${vocabW}%;"><col style="width:${kanaW}%;"><col style="width:${meaningW}%;"><!-- blanks -->
       ${Array.from({length: blankCount}, () => `<col style="width:${blankW.toFixed(2)}%;">`).join("")}
     `;
 
@@ -678,6 +722,61 @@
     return miss;
   };
 
+  // ======= BẮT NỢ REVIEW (pendingReviewQueue) =======
+  const isFinalized = (d) => state.generatedByDate?.[d]?.finalized === true;
+
+  const uniqSortedDates = (dates) => {
+    const set = new Set(dates.filter(Boolean));
+    return Array.from(set).sort((a,b)=> ymdToDay(a) - ymdToDay(b));
+  };
+
+  const reviewDatesUpTo = (realToday) => {
+    if (!state.startDate) return [];
+    const idxT = idxFromStart(realToday);
+    if (!idxT || idxT < 1) return [];
+
+    const dates = [];
+
+    // TRI first
+    for (let i = TRI_EVERY_DAYS; i <= idxT; i += TRI_EVERY_DAYS) {
+      dates.push(addDays(state.startDate, i - 1));
+    }
+    // WEEKLY (exclude overlap with TRI)
+    for (let i = WEEKLY_EVERY_DAYS; i <= idxT; i += WEEKLY_EVERY_DAYS) {
+      if (i % TRI_EVERY_DAYS === 0) continue;
+      dates.push(addDays(state.startDate, i - 1));
+    }
+    return uniqSortedDates(dates);
+  };
+
+  const syncPendingReviewQueue = (realToday) => {
+    ensureStartDate();
+    if (!Array.isArray(state.pendingReviewQueue)) state.pendingReviewQueue = [];
+
+    const oldKey = state.pendingReviewQueue.join("|");
+    const todayDay = ymdToDay(realToday);
+
+    // 1) dọn queue cũ (future / đã finalized / không phải review day)
+    let q = state.pendingReviewQueue
+      .filter(d => d && ymdToDay(d) <= todayDay)
+      .filter(d => isReviewOnlyDay(d))
+      .filter(d => !isFinalized(d));
+
+    // 2) bổ sung các ngày review đã trôi qua nhưng chưa finalized (kể cả chưa tạo đề)
+    const missed = reviewDatesUpTo(realToday).filter(d => !isFinalized(d));
+    q = uniqSortedDates(q.concat(missed));
+
+    state.pendingReviewQueue = q;
+
+    const newKey = state.pendingReviewQueue.join("|");
+    if (newKey !== oldKey) save(state);
+  };
+
+  const getSessionDate = (realToday) => {
+    syncPendingReviewQueue(realToday);
+    return (state.pendingReviewQueue && state.pendingReviewQueue.length) ? state.pendingReviewQueue[0] : realToday;
+  };
+
   // ======= UI HOOKS =======
   const $ = (id) => document.getElementById(id);
 
@@ -713,9 +812,57 @@
   const previewHeadRow = $("previewHeadRow");
   const previewBody = $("previewBody");
 
+  const previewPager = $("previewPager");
+  const previewPrevBtn = $("previewPrevBtn");
+  const previewNextBtn = $("previewNextBtn");
+  const previewPageInfo = $("previewPageInfo");
+  const previewPageSelect = $("previewPageSelect");
+
   const historyDateSelect = $("historyDateSelect");
   const historyBody = $("historyBody");
+
+  const historyPager = $("historyPager");
+  const historyPrevBtn = $("historyPrevBtn");
+  const historyNextBtn = $("historyNextBtn");
+  const historyPageInfo = $("historyPageInfo");
+  const historyPageSelect = $("historyPageSelect");
+
   const clearLocalBtn = $("clearLocalBtn");
+
+  // UI paging state (không lưu local)
+  const ui = {
+    previewPage: 1,
+    historyPage: 1,
+    lastHistoryDate: null,
+    lastSessionDate: null
+  };
+
+  const clampPage = (page, totalPages) => Math.min(Math.max(1, page), Math.max(1, totalPages));
+
+  const updatePagerUI = ({ wrap, prevBtn, nextBtn, infoEl, selectEl, totalItems, pageSize, page }) => {
+    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+    const p = clampPage(page, totalPages);
+
+    if (totalPages <= 1) {
+      wrap.style.display = "none";
+      return { totalPages, page: p };
+    }
+
+    wrap.style.display = "flex";
+    prevBtn.disabled = (p <= 1);
+    nextBtn.disabled = (p >= totalPages);
+    infoEl.textContent = `Trang ${p}/${totalPages} • ${totalItems} từ`;
+
+    // build select
+    const curVal = String(p);
+    const opts = [];
+    for (let i = 1; i <= totalPages; i++) {
+      opts.push(`<option value="${i}" ${String(i)===curVal?"selected":""}>Trang ${i}</option>`);
+    }
+    selectEl.innerHTML = opts.join("");
+
+    return { totalPages, page: p };
+  };
 
   // ======= BULK INPUT =======
   const parseLines = (text) => {
@@ -737,15 +884,21 @@
   });
 
   bulkAddBtn.addEventListener("click", () => {
-    const t = todayStr();
+    const realToday = todayStr();
     ensureStartDate();
+    syncPendingReviewQueue(realToday);
 
-    if (isReviewOnlyDay(t)) {
+    if ((state.pendingReviewQueue?.length || 0) > 0) {
+      msg.innerHTML = `<span class="warn">Bạn đang có bài <b>bắt nợ tổng ôn</b> → cần hoàn tất trước khi thêm từ mới.</span>`;
+      return;
+    }
+
+    if (isReviewOnlyDay(realToday)) {
       msg.innerHTML = `<span class="warn">Hôm nay là ngày tổng ôn 7/21 → tạm không thêm từ mới. Mai thêm tiếp nhé.</span>`;
       return;
     }
 
-    let remaining = DAILY_NEW_LIMIT - countNewOnDate(t);
+    let remaining = DAILY_NEW_LIMIT - countNewOnDate(realToday);
     if (remaining <= 0) return;
 
     const items = parseLines(bulkText.value);
@@ -754,7 +907,7 @@
       return;
     }
 
-    if (!state.startDate) state.startDate = t;
+    if (!state.startDate) state.startDate = realToday;
 
     let added = 0;
     for (const it of items) {
@@ -769,12 +922,12 @@
         vocab: it.vocab,
         kana: it.kana,
         meaning: it.meaning,
-        addedDate: t,
+        addedDate: realToday,
 
         ef: 2.5,
         reps: 0,
         interval: 0,
-        due: t,
+        due: realToday,
         lastReviewed: null,
         lapses: 0,
         failStreak: 0,
@@ -787,7 +940,7 @@
 
     save(state);
     bulkText.value = "";
-    msg.innerHTML = `<span class="ok">Đã thêm ${added} từ (còn thiếu ${DAILY_NEW_LIMIT - countNewOnDate(t)} từ để đủ 50).</span>`;
+    msg.innerHTML = `<span class="ok">Đã thêm ${added} từ (còn thiếu ${DAILY_NEW_LIMIT - countNewOnDate(realToday)} từ để đủ 50).</span>`;
     render();
   });
 
@@ -813,16 +966,17 @@
     msg.innerHTML = `<span class="ok">Đã về mốc cố định mặc định.</span>`;
   });
 
-  // ======= GENERATE / REPRINT =======
+  // ======= GENERATE / REPRINT (theo sessionDate: bắt nợ hoặc hôm nay) =======
   genBtn.addEventListener("click", () => {
-    const t = todayStr();
+    const realToday = todayStr();
     ensureStartDate();
+    const sessionDate = getSessionDate(realToday);
 
-    const snap = state.generatedByDate?.[t];
+    const snap = state.generatedByDate?.[sessionDate];
 
     // Reprint
     if (snap) {
-      const cycle = getDailyCycle(t);
+      const cycle = getDailyCycle(realToday);
       const ids = snap.ids || [];
       const list = ids.map(id => state.words.find(w => w.id === id)).filter(Boolean).map(normalizeCard);
 
@@ -832,40 +986,43 @@
       }
 
       const showCreatedDate = (snap.mode === "tri"); // chỉ tri mới show date
-      const ok = openPrintWindow(t, list, cycle, snap.note || "", showCreatedDate);
+      const note = snap.note || (sessionDate !== realToday ? `Thực hiện ngày: ${realToday}` : "");
+      const ok = openPrintWindow(sessionDate, list, cycle, note, showCreatedDate);
       if (!ok) {
         msg.innerHTML = `<span class="err">Trình duyệt chặn pop-up. Hãy cho phép pop-up rồi bấm lại.</span>`;
         return;
       }
 
-      msg.innerHTML = `<span class="ok">Đang in lại đề (thứ tự giữ nguyên). SR chỉ cập nhật khi bạn bấm “Hoàn tất”.</span>`;
+      msg.innerHTML = `<span class="ok">Đang in lại đề (${sessionDate}). SR chỉ cập nhật khi bạn bấm “Hoàn tất”.</span>`;
       return;
     }
 
     // Create new
-    const pool = buildSessionPool(t);
+    const pool = buildSessionPool(sessionDate);
     if (pool.list.length === 0) {
-      msg.innerHTML = `<span class="warn">Hôm nay chưa có gì để tạo đề.</span>`;
+      msg.innerHTML = `<span class="warn">Chưa có gì để tạo đề cho ngày ${escapeHtml(sessionDate)}.</span>`;
       return;
     }
 
-    const cycle = getDailyCycle(t);
+    const cycle = getDailyCycle(realToday);
     const showCreatedDate = (pool.mode === "tri");
 
-    const note =
+    const baseNote =
       pool.mode === "tri"
-        ? `TỔNG ÔN 21 NGÀY (cộng dồn): ôn ${pool.triCount} từ (từ ${state.startDate} → ${t}) • Due hôm nay: ${pool.dueCount}`
+        ? `TỔNG ÔN 21 NGÀY (cộng dồn): ôn ${pool.triCount} từ (từ ${state.startDate} → ${sessionDate}) • Due đến ${sessionDate}: ${pool.dueCount}`
         : pool.mode === "weekly"
           ? `TỔNG ÔN 7 NGÀY: ôn ${pool.weeklyCount} từ (7 ngày gần nhất) • Due: ${pool.dueCount} • Weak: ${pool.weakCount} • New: ${pool.newCount}`
           : `New: ${pool.newCount} • Due: ${pool.dueCount} • Weak: ${pool.weakCount}`;
 
-    const ok = openPrintWindow(t, pool.list, cycle, note, showCreatedDate);
+    const note = (sessionDate !== realToday) ? `${baseNote} • Thực hiện ngày: ${realToday}` : baseNote;
+
+    const ok = openPrintWindow(sessionDate, pool.list, cycle, note, showCreatedDate);
     if (!ok) {
       msg.innerHTML = `<span class="err">Trình duyệt chặn pop-up. Hãy cho phép pop-up rồi bấm lại.</span>`;
       return;
     }
 
-    state.generatedByDate[t] = {
+    state.generatedByDate[sessionDate] = {
       ids: pool.list.map(w => w.id),
       results: {},
       finalized: false,
@@ -873,12 +1030,17 @@
       mode: pool.mode,
       note
     };
-    ensureSnap(t, state.generatedByDate[t].ids);
+    ensureSnap(sessionDate, state.generatedByDate[sessionDate].ids);
 
     save(state);
+
+    // reset preview page khi tạo đề mới (hoặc đổi sessionDate)
+    ui.previewPage = 1;
+    ui.lastSessionDate = sessionDate;
+
     render();
 
-    msg.innerHTML = `<span class="ok">Đã tạo đề hôm nay (${pool.mode === "tri" ? "TỔNG ÔN 21" : pool.mode === "weekly" ? "TỔNG ÔN 7" : "ngày thường"}). Làm xong quay lại chấm ✓/✗ rồi bấm “Hoàn tất”.</span>`;
+    msg.innerHTML = `<span class="ok">Đã tạo đề ${sessionDate} (${modeLabel(pool.mode)}). Làm xong quay lại chấm ✓/✗ rồi bấm “Hoàn tất”.</span>`;
   });
 
   // ======= MARKING CLICK (preview table) =======
@@ -886,15 +1048,16 @@
     const td = e.target.closest("td.markable");
     if (!td) return;
 
-    const t = todayStr();
-    const snap = state.generatedByDate?.[t];
+    const realToday = todayStr();
+    const sessionDate = getSessionDate(realToday);
+    const snap = state.generatedByDate?.[sessionDate];
     if (!snap || snap.finalized) return;
 
     const id = td.dataset.id;
     const idx = Number(td.dataset.try);
     if (!id || !Number.isFinite(idx)) return;
 
-    ensureSnap(t, snap.ids);
+    ensureSnap(sessionDate, snap.ids);
 
     const arr = snap.results[id];
     const cur = arr[idx];
@@ -908,19 +1071,21 @@
     if (next === 1) { td.classList.add("pass"); td.textContent = "✓"; }
     else if (next === 0) { td.classList.add("fail"); td.textContent = "✗"; }
 
-    const miss = missingCount(ensureSnap(t, snap.ids));
-    finalizeBtn.disabled = miss > 0;
+    const miss = missingCount(ensureSnap(sessionDate, snap.ids));
+    // UX mới: KHÔNG khóa nút finalize
+    finalizeBtn.disabled = false;
     resultHint.innerHTML = miss === 0
       ? `<span class="ok">Đã có kết quả cho tất cả từ. Có thể bấm “Hoàn tất & cập nhật SR”.</span>`
-      : `<span class="warn">Còn ${miss} từ chưa có kết quả (click ô để đổi ✓ / ✗ / trống).</span>`;
+      : `<span class="warn">Còn ${miss} từ chưa chấm. Bạn vẫn có thể bấm “Hoàn tất” (các từ chưa chấm sẽ không update SR).</span>`;
   });
 
   markPassAllBtn.addEventListener("click", () => {
-    const t = todayStr();
-    const snap = state.generatedByDate?.[t];
+    const realToday = todayStr();
+    const sessionDate = getSessionDate(realToday);
+    const snap = state.generatedByDate?.[sessionDate];
     if (!snap || snap.finalized) return;
 
-    ensureSnap(t, snap.ids);
+    ensureSnap(sessionDate, snap.ids);
     for (const id of snap.ids) {
       const arr = snap.results[id];
       if (!lastOutcome(arr)) arr[arr.length - 1] = 1;
@@ -931,53 +1096,69 @@
   });
 
   clearMarksBtn.addEventListener("click", () => {
-    const t = todayStr();
-    const snap = state.generatedByDate?.[t];
+    const realToday = todayStr();
+    const sessionDate = getSessionDate(realToday);
+    const snap = state.generatedByDate?.[sessionDate];
     if (!snap || snap.finalized) return;
 
-    const ok = window.confirm("Xóa toàn bộ đánh dấu kết quả hôm nay? (Không thể hoàn tác)");
+    const ok = window.confirm(`Xóa toàn bộ đánh dấu kết quả của đề ${sessionDate}? (Không thể hoàn tác)`);
     if (!ok) return;
 
-    ensureSnap(t, snap.ids);
+    ensureSnap(sessionDate, snap.ids);
     for (const id of snap.ids) snap.results[id] = Array.from({ length: BLANK_COLS }, () => null);
 
     save(state);
     render();
-    msg.innerHTML = `<span class="ok">Đã xóa toàn bộ đánh dấu hôm nay.</span>`;
+    msg.innerHTML = `<span class="ok">Đã xóa toàn bộ đánh dấu.</span>`;
   });
 
   finalizeBtn.addEventListener("click", () => {
-    const t = todayStr();
-    const snap = state.generatedByDate?.[t];
+    const realToday = todayStr();
+    const sessionDate = getSessionDate(realToday);
+    const snap = state.generatedByDate?.[sessionDate];
     if (!snap || snap.finalized) return;
 
-    ensureSnap(t, snap.ids);
+    ensureSnap(sessionDate, snap.ids);
+
     const miss = missingCount(snap);
     if (miss > 0) {
-      msg.innerHTML = `<span class="warn">Còn ${miss} từ chưa có kết quả. Hãy đánh dấu đủ rồi hãy “Hoàn tất”.</span>`;
-      return;
+      const ok = window.confirm(
+        `Bạn còn ${miss} từ chưa chấm.\n` +
+        `Những từ này sẽ KHÔNG được cập nhật SR.\n\n` +
+        `Bạn có chắc chắn muốn lưu và hoàn tất không?`
+      );
+      if (!ok) return;
     }
 
+    let updated = 0;
     for (const id of snap.ids) {
       const card = state.words.find(x => x.id === id);
       if (!card) continue;
       normalizeCard(card);
 
       const outcome = lastOutcome(snap.results[id]);
+      if (!outcome) continue; // bỏ qua từ chưa chấm
       const quality = (outcome === "pass") ? 4 : 2; // ✓ good, ✗ again
-      sm2Update(card, quality, t);
+      sm2Update(card, quality, realToday); // update theo ngày thực làm
+      updated++;
     }
 
     snap.finalized = true;
     snap.finalizedAt = new Date().toISOString();
 
     save(state);
+
+    // xóa nợ nếu có (sync sẽ tự bỏ những ngày đã finalized)
+    syncPendingReviewQueue(realToday);
+
     render();
 
-    msg.innerHTML = `<span class="ok">Đã cập nhật SR. Ngày thường: due + weak + new. Ngày 7: tổng ôn 7 ngày. Ngày 21/42/63…: tổng ôn 21 (ôn hết tất cả từ).</span>`;
+    msg.innerHTML = miss > 0
+      ? `<span class="ok">Đã hoàn tất. Cập nhật SR cho ${updated} từ đã chấm (bỏ qua ${miss} từ chưa chấm).</span>`
+      : `<span class="ok">Đã hoàn tất. Cập nhật SR cho ${updated} từ.</span>`;
   });
 
-  // ======= HISTORY (edit/delete) =======
+  // ======= HISTORY (edit/delete + pagination) =======
   let editingId = null;
 
   const getAllDatesDesc = () => {
@@ -986,11 +1167,31 @@
   };
 
   const renderHistoryTable = (d) => {
-    const rows = state.words
+    const allRows = state.words
       .filter(w => w.addedDate === d)
       .map(normalizeCard);
 
-    if (rows.length === 0) {
+    const total = allRows.length;
+    const pageSize = HISTORY_PAGE_SIZE;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    ui.historyPage = clampPage(ui.historyPage, totalPages);
+
+    const start = (ui.historyPage - 1) * pageSize;
+    const rows = allRows.slice(start, start + pageSize);
+
+    const pager = updatePagerUI({
+      wrap: historyPager,
+      prevBtn: historyPrevBtn,
+      nextBtn: historyNextBtn,
+      infoEl: historyPageInfo,
+      selectEl: historyPageSelect,
+      totalItems: total,
+      pageSize,
+      page: ui.historyPage
+    });
+    ui.historyPage = pager.page;
+
+    if (total === 0) {
       historyBody.innerHTML = `<tr><td colspan="4" class="muted">Không có từ nào trong ngày này.</td></tr>`;
       return;
     }
@@ -1079,7 +1280,36 @@
 
   historyDateSelect.addEventListener("change", () => {
     editingId = null;
+    ui.historyPage = 1;
+    ui.lastHistoryDate = historyDateSelect.value;
     renderHistoryTable(historyDateSelect.value);
+  });
+
+  historyPrevBtn.addEventListener("click", () => {
+    ui.historyPage = Math.max(1, ui.historyPage - 1);
+    renderHistoryTable(historyDateSelect.value);
+  });
+  historyNextBtn.addEventListener("click", () => {
+    ui.historyPage = ui.historyPage + 1;
+    renderHistoryTable(historyDateSelect.value);
+  });
+  historyPageSelect.addEventListener("change", () => {
+    ui.historyPage = Number(historyPageSelect.value) || 1;
+    renderHistoryTable(historyDateSelect.value);
+  });
+
+  // ======= PREVIEW PAGER EVENTS =======
+  previewPrevBtn.addEventListener("click", () => {
+    ui.previewPage = Math.max(1, ui.previewPage - 1);
+    render();
+  });
+  previewNextBtn.addEventListener("click", () => {
+    ui.previewPage = ui.previewPage + 1;
+    render();
+  });
+  previewPageSelect.addEventListener("change", () => {
+    ui.previewPage = Number(previewPageSelect.value) || 1;
+    render();
   });
 
   // ======= CLEAR LOCAL =======
@@ -1090,6 +1320,10 @@
     state = defaultState();
     bulkText.value = "";
     msg.innerHTML = `<span class="ok">Đã xóa dữ liệu local và reset toàn bộ hệ thống.</span>`;
+    ui.previewPage = 1;
+    ui.historyPage = 1;
+    ui.lastHistoryDate = null;
+    ui.lastSessionDate = null;
     render();
   });
 
@@ -1097,51 +1331,68 @@
   const render = () => {
     ensureStartDate();
 
-    const t = todayStr();
-    const mode = getModeForDate(t);
-    const pool = buildSessionPool(t);
-    const snap = state.generatedByDate?.[t] || null;
+    const realToday = todayStr();
+    syncPendingReviewQueue(realToday);
+    const sessionDate = getSessionDate(realToday);
+    const sessionMode = getModeForDate(sessionDate);
 
-    const cycle = getDailyCycle(t);
-    const newCount = countNewOnDate(t);
-    const dueCount = dueCountOnDate(t);
+    // reset preview page nếu đổi sessionDate
+    if (ui.lastSessionDate !== sessionDate) {
+      ui.previewPage = 1;
+      ui.lastSessionDate = sessionDate;
+    }
 
-    todayPill.textContent = `Hôm nay: ${t}`;
-    modePill.textContent =
-      mode === "tri" ? "Chế độ: TỔNG ÔN 21 (ôn hết tất cả)" :
-      mode === "weekly" ? "Chế độ: TỔNG ÔN 7" :
-      "Chế độ: Ngày thường";
+    // pool/snap theo sessionDate (bắt nợ hoặc hôm nay)
+    const pool = buildSessionPool(sessionDate);
+    const snap = state.generatedByDate?.[sessionDate] || null;
+
+    // cycle luôn theo realToday (đang học thật)
+    const cycle = getDailyCycle(realToday);
+
+    const newCount = countNewOnDate(realToday);
+    const dueCount = dueCountOnDate(realToday);
+
+    const hasPending = (state.pendingReviewQueue?.length || 0) > 0;
+    const doingDebt = hasPending && sessionDate !== realToday;
+
+    todayPill.textContent = doingDebt ? `Hôm nay: ${realToday} • Bắt nợ: ${sessionDate}` : `Hôm nay: ${realToday}`;
+    modePill.textContent = `Chế độ: ${modeLabel(sessionMode)}`;
 
     newPill.textContent = `Từ mới hôm nay: ${newCount}/${DAILY_NEW_LIMIT}`;
     duePill.textContent = `Đến hạn hôm nay: ${dueCount}`;
     weakPill.textContent = `Chèn từ yếu (đề): ${pool.weakCount}`;
     totalPill.textContent = `Tổng từ đã lưu: ${state.words.length}`;
 
-    // Bulk show/hide by mode
-    const reviewOnly = (mode === "weekly" || mode === "tri");
-    bulkSection.style.display = reviewOnly ? "none" : "block";
+    // Lock add-new if pending OR today is review-only
+    const lockNew = hasPending || isReviewOnlyDay(realToday);
+    bulkSection.style.display = lockNew ? "none" : "block";
+    bulkAddBtn.disabled = lockNew ? true : (newCount >= DAILY_NEW_LIMIT);
+    bulkClearBtn.disabled = lockNew;
+    bulkText.disabled = lockNew;
 
-    if (reviewOnly) {
+    if (hasPending) {
       reviewNotice.style.display = "block";
-      reviewNotice.innerHTML = mode === "tri"
-        ? `Hôm nay là <b>TỔNG ÔN 21 NGÀY (ôn hết tất cả từ)</b> → ôn lại toàn bộ từ từ <b>${escapeHtml(state.startDate || t)}</b> đến <b>${escapeHtml(t)}</b>. Tạm ẩn nhập từ mới.`
+      const remain = state.pendingReviewQueue.length;
+      const extra = remain > 1 ? ` (còn ${remain-1} bài sau bài này)` : "";
+      reviewNotice.innerHTML =
+        `Bạn đang có <b>bài bắt nợ</b> cần hoàn thành trước khi học tiếp: <b>${escapeHtml(modeLabel(sessionMode))}</b> — ngày <b>${escapeHtml(sessionDate)}</b>${extra}. ` +
+        (doingDebt ? `Thực hiện ngày <b>${escapeHtml(realToday)}</b>.` : `Hôm nay chính là ngày review.`) +
+        ` Bấm “Tạo file kiểm tra” để in đề, chấm và “Hoàn tất”.`;
+    } else if (isReviewOnlyDay(realToday)) {
+      reviewNotice.style.display = "block";
+      reviewNotice.innerHTML = sessionMode === "tri"
+        ? `Hôm nay là <b>TỔNG ÔN 21 NGÀY (ôn hết tất cả từ)</b> → ôn lại toàn bộ từ từ <b>${escapeHtml(state.startDate || realToday)}</b> đến <b>${escapeHtml(realToday)}</b>. Tạm ẩn nhập từ mới.`
         : `Hôm nay là <b>TỔNG ÔN 7 NGÀY</b> → ôn lại tất cả từ của 7 ngày gần nhất. Tạm ẩn nhập từ mới.`;
     } else {
       reviewNotice.style.display = "none";
       reviewNotice.textContent = "";
     }
 
-    bulkAddBtn.disabled = reviewOnly ? true : (newCount >= DAILY_NEW_LIMIT);
-    bulkClearBtn.disabled = reviewOnly;
-    bulkText.disabled = reviewOnly;
-
-    genBtn.textContent = snap ? "In lại đề hôm nay"
-      : mode === "tri" ? "Tạo đề tổng ôn 21"
-      : mode === "weekly" ? "Tạo đề tổng ôn 7"
-      : "Tạo file kiểm tra hôm nay";
+    // Gen button label
+    genBtn.textContent = snap ? `In lại đề (${sessionDate})` : `Tạo file kiểm tra (${sessionDate})`;
 
     // Start time hint
-    const start = getCycleStartForDate(t);
+    const start = getCycleStartForDate(realToday);
     startTimeInput.value = start || "";
     startTimeHint.textContent = start
       ? `Giờ bắt đầu: ${start} → mốc trong ngày: ${cycle.join(" · ")} (<= 23:59)`
@@ -1151,22 +1402,23 @@
 
     // Result actions
     if (snap) {
-      ensureSnap(t, snap.ids || []);
+      ensureSnap(sessionDate, snap.ids || []);
       resultActions.style.display = "flex";
 
       if (snap.finalized) {
         finalizeBtn.disabled = true;
         markPassAllBtn.disabled = true;
         clearMarksBtn.disabled = true;
-        resultHint.innerHTML = `<span class="ok">Đã hoàn tất và cập nhật SR cho ngày ${t}.</span>`;
+        resultHint.innerHTML = `<span class="ok">Đã hoàn tất và cập nhật SR cho đề ${sessionDate}.</span>`;
       } else {
         const miss = missingCount(snap);
-        finalizeBtn.disabled = miss > 0;
+        // UX mới: luôn cho finalize, chỉ cảnh báo
+        finalizeBtn.disabled = false;
         markPassAllBtn.disabled = false;
         clearMarksBtn.disabled = false;
         resultHint.innerHTML = miss === 0
           ? `<span class="ok">Đã có kết quả cho tất cả từ. Có thể bấm “Hoàn tất & cập nhật SR”.</span>`
-          : `<span class="warn">Còn ${miss} từ chưa có kết quả (click ô để đổi ✓ / ✗ / trống).</span>`;
+          : `<span class="warn">Còn ${miss} từ chưa chấm. Bạn vẫn có thể “Hoàn tất” (các từ chưa chấm sẽ không update SR).</span>`;
       }
     } else {
       resultActions.style.display = "none";
@@ -1175,18 +1427,17 @@
 
     // Message
     if (snap && !snap.finalized) {
-      msg.innerHTML = `<span class="warn">Bạn đã tạo đề hôm nay. Làm xong quay lại chấm ✓/✗ và bấm “Hoàn tất”.</span>`;
+      msg.innerHTML = `<span class="warn">Bạn đã tạo đề ${escapeHtml(sessionDate)}. Chấm ✓/✗ và bấm “Hoàn tất”.</span>`;
     } else if (snap && snap.finalized) {
-      msg.innerHTML = `<span class="ok">Hôm nay đã cập nhật SR. Ngày thường: due + weak + new. Ngày 7: tổng ôn 7. Ngày 21/42/63…: tổng ôn 21 (ôn hết tất cả).</span>`;
+      msg.innerHTML = hasPending
+        ? `<span class="ok">Đã hoàn tất bài ${escapeHtml(sessionDate)}. Nếu còn bài bắt nợ, app sẽ chuyển sang bài tiếp theo.</span>`
+        : `<span class="ok">Đã cập nhật SR. Ngày thường: due + weak + new. Ngày 7: tổng ôn 7. Ngày 21/42/63…: tổng ôn 21.</span>`;
     } else if (pool.list.length === 0) {
-      msg.innerHTML = `<span class="warn">Hôm nay chưa có gì để tạo đề.</span>`;
-    } else if (!reviewOnly && newCount < DAILY_NEW_LIMIT) {
-      msg.innerHTML = `<span class="warn">Chưa đủ 50 từ mới, nhưng vẫn có thể tạo đề nhờ due/weak. (Muốn “50/ngày” thì nhập thêm.)</span>`;
+      msg.innerHTML = `<span class="warn">Chưa có gì để tạo đề cho ngày ${escapeHtml(sessionDate)}.</span>`;
+    } else if (!lockNew && newCount < DAILY_NEW_LIMIT) {
+      msg.innerHTML = `<span class="warn">Chưa đủ 50 từ mới, nhưng vẫn có thể tạo đề nhờ due/weak.</span>`;
     } else {
-      const heavy = mode === "tri" && pool.list.length > 700;
-      msg.innerHTML = heavy
-        ? `<span class="warn">TỔNG ÔN 21 đang rất lớn (${pool.list.length} từ). In PDF có thể nặng — bạn có thể in và ôn theo từng phần.</span>`
-        : `<span class="ok">Sẵn sàng tạo đề. Review: ${pool.list.length} từ.</span>`;
+      msg.innerHTML = `<span class="ok">Sẵn sàng tạo đề: ${pool.list.length} từ.</span>`;
     }
 
     // Preview header
@@ -1200,22 +1451,48 @@
     previewHeadRow.innerHTML = ths.join("");
 
     // Preview list: use snap if exists else live pool
-    const list = (() => {
+    const fullList = (() => {
       if (!snap) return pool.list;
       const ids = snap.ids || [];
       return ids.map(id => state.words.find(w => w.id === id)).filter(Boolean).map(normalizeCard);
     })();
 
-    // Show created date only if "tổng ôn hết tất cả từ" => TRI
-    const showCreatedDate = snap ? (snap.mode === "tri") : (mode === "tri");
+    // Show created date only if TRI
+    const showCreatedDate = snap ? (snap.mode === "tri") : (sessionMode === "tri");
 
-    if (list.length === 0) {
+    // Preview pagination
+    const total = fullList.length;
+    const pageSize = PREVIEW_PAGE_SIZE;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    ui.previewPage = clampPage(ui.previewPage, totalPages);
+
+    const pager = updatePagerUI({
+      wrap: previewPager,
+      prevBtn: previewPrevBtn,
+      nextBtn: previewNextBtn,
+      infoEl: previewPageInfo,
+      selectEl: previewPageSelect,
+      totalItems: total,
+      pageSize,
+      page: ui.previewPage
+    });
+    ui.previewPage = pager.page;
+
+    const startIdx = (ui.previewPage - 1) * pageSize;
+    const list = fullList.slice(startIdx, startIdx + pageSize);
+
+    if (total === 0) {
       previewBody.innerHTML = `<tr><td colspan="${4 + cycle.length}" class="muted">Chưa có từ nào để hiển thị.</td></tr>`;
     } else {
-      previewBody.innerHTML = list.map(w => {
+      const cols = 4 + cycle.length;
+      const headerNote = totalPages > 1
+        ? `<tr><td colspan="${cols}" class="muted">Đang hiển thị block ${ui.previewPage}/${totalPages} (mỗi block ${pageSize} từ).</td></tr>`
+        : "";
+
+      previewBody.innerHTML = headerNote + list.map(w => {
         let blanks = "";
         if (snap && !snap.finalized) {
-          ensureSnap(t, snap.ids);
+          ensureSnap(sessionDate, snap.ids);
           const res = snap.results?.[w.id] || Array.from({ length: BLANK_COLS }, () => null);
           blanks = res.map((v, i) => {
             const cls = v === 1 ? "markable pass" : v === 0 ? "markable fail" : "markable";
@@ -1240,13 +1517,20 @@
     if (dates.length === 0) {
       historyDateSelect.innerHTML = `<option value="">(Chưa có dữ liệu)</option>`;
       historyBody.innerHTML = `<tr><td colspan="4" class="muted">Chưa có từ nào được lưu.</td></tr>`;
+      historyPager.style.display = "none";
     } else {
       const current = historyDateSelect.value || dates[0];
       historyDateSelect.innerHTML = dates.map(d => {
         const n = countNewOnDate(d);
         return `<option value="${d}" ${d===current?"selected":""}>${d} — ${n} từ</option>`;
       }).join("");
-      renderHistoryTable(historyDateSelect.value || dates[0]);
+
+      const selected = historyDateSelect.value || dates[0];
+      if (ui.lastHistoryDate !== selected) {
+        ui.historyPage = 1;
+        ui.lastHistoryDate = selected;
+      }
+      renderHistoryTable(selected);
     }
   };
 
