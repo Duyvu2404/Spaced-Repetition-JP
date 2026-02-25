@@ -4,9 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>SR 50 từ/ngày</title>
+
   <style>
     :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans JP", sans-serif; }
-    *, *::before, *::after { box-sizing: border-box; } /* FIX overflow */
+    *, *::before, *::after { box-sizing: border-box; }
 
     body { margin: 0; background: #0b0f14; color: #e8eef7; }
     .wrap { max-width: 1180px; margin: 0 auto; padding: 22px; }
@@ -59,7 +60,7 @@
     tbody td{
       border-top:1px solid #1a2535; padding: 10px; font-size: 13px; vertical-align: top;
     }
-    tbody td.blank{ height: 46px; } /* preview giống in: ô viết to */
+    tbody td.blank{ height: 46px; }
 
     .historyWrap{
       overflow:auto; border:1px solid #1f2a39; border-radius: 12px; background:#0f1620;
@@ -68,12 +69,8 @@
     .historyTable{ min-width: 100%; }
     .historyTable thead th{ position: sticky; top: 0; }
 
-    .danger {
-      background: #3a1a1a;
-      border-color: #5a2a2a;
-    }
+    .danger { background: #3a1a1a; border-color: #5a2a2a; }
 
-    /* tiny buttons in table */
     .btnMini{
       padding: 8px 10px;
       font-size: 12px;
@@ -82,6 +79,7 @@
     }
   </style>
 </head>
+
 <body>
 <div class="wrap">
   <h1>Spaced Repetition — 50 từ mới/ngày + trộn ôn thông minh</h1>
@@ -108,13 +106,14 @@
         <button id="bulkClearBtn" type="button">Xóa ô nhập</button>
       </div>
 
-      <!-- NEW: START TIME -->
       <div class="sep"></div>
       <div style="font-weight:800; margin-bottom:6px;">Giờ bắt đầu học hôm nay (tùy chọn)</div>
       <div class="kicker">
-        Nếu chọn, hệ thống tự tạo 5 mốc ngắt quãng theo giờ bắt đầu: <b>0h · +3h · +6h · +10h · +14h</b>.<br>
+        Nếu chọn, hệ thống tự chia <b>5 mốc</b> trong ngày theo nhịp nhẹ nhàng/dồn dập tùy thời gian còn lại,
+        và <b>luôn nằm trong 23:59</b> (không qua 00:00).<br>
         Nếu không chọn, dùng mốc cố định: <span class="muted">08:00 · 11:00 · 14:00 · 18:00 · 22:00</span>.
       </div>
+
       <div class="actions" style="margin-top:10px;">
         <input id="startTimeInput" type="time" step="60" style="flex:1; min-width: 160px;">
         <button id="applyStartTimeBtn" type="button">Áp dụng cho hôm nay</button>
@@ -133,6 +132,7 @@
       <div style="font-weight:800;">Kho lưu trữ lịch sử (xem lại theo ngày)</div>
       <div class="kicker" style="margin-top:6px;">Chọn ngày để xem danh sách từ đã nhập hôm đó (có thể sửa/xóa từng từ).</div>
       <select id="historyDateSelect" style="width:100%; margin-top:10px;"></select>
+
       <div class="historyWrap">
         <table class="historyTable">
           <thead>
@@ -184,16 +184,17 @@
   const TZ = "Asia/Bangkok";
   const DAILY_NEW_LIMIT = 50;
 
-  // mốc mặc định (GIỮ NGUYÊN như cũ)
+  // mốc mặc định (GIỮ NGUYÊN)
   const DEFAULT_DAILY_CYCLE = ["08:00", "11:00", "14:00", "18:00", "22:00"];
 
-  // giữ nhịp cũ theo khoảng cách: 0h, +3h, +6h, +10h, +14h
-  const CYCLE_OFFSETS_MIN = [0, 180, 360, 600, 840];
+  // "hình dáng" nhịp cũ: 0h, +3h, +6h, +10h, +14h (dùng để scale theo thời gian còn lại)
+  const SHAPE_OFFSETS_MIN = [0, 180, 360, 600, 840];
+  const SHAPE_SPAN_MIN = SHAPE_OFFSETS_MIN[SHAPE_OFFSETS_MIN.length - 1];
 
   // cột viết = 1 (Học mới) + 5 (giờ)
   const BLANK_COLS = 1 + DEFAULT_DAILY_CYCLE.length;
 
-  // khoảng SR (tăng dần theo số lần "Tạo file" chứa từ đó)
+  // SR giữ nguyên
   const INTERVALS_DAYS = [1, 2, 4, 7, 14, 30, 60, 120];
 
   // ======= TIỆN ÍCH NGÀY =======
@@ -213,7 +214,7 @@
     return (h*60 + m) || 0;
   };
   const minToHHMM = (min) => {
-    const mm = ((min % 1440) + 1440) % 1440;
+    const mm = Math.max(0, Math.min(1439, Math.floor(min))); // clamp 00:00..23:59
     const h = Math.floor(mm/60);
     const m = mm % 60;
     return String(h).padStart(2,"0") + ":" + String(m).padStart(2,"0");
@@ -240,7 +241,8 @@
     startDate: null,
     lastGeneratedDate: null,
     words: [],
-    settings: { cycleStartByDate: {} } // NEW (không ảnh hưởng SR)
+    settings: { cycleStartByDate: {} },
+    generatedByDate: {} // snapshot ids để in lại giữ thứ tự từ
   });
 
   const load = () => {
@@ -251,13 +253,13 @@
       if (!s.words) s.words = [];
       if (!s.settings) s.settings = { cycleStartByDate: {} };
       if (!s.settings.cycleStartByDate) s.settings.cycleStartByDate = {};
+      if (!s.generatedByDate) s.generatedByDate = {};
       return s;
     } catch {
       return defaultState();
     }
   };
   const save = (s) => localStorage.setItem(KEY, JSON.stringify(s));
-
   let state = load();
 
   // ======= LOGIC SR (GIỮ NGUYÊN) =======
@@ -290,7 +292,6 @@
     }).length;
   };
 
-  // Pool hôm nay: New + Due + (weekly-7days on day7). Trộn ổn định theo ngày.
   const buildTodayPool = (t) => {
     const tDay = ymdToDay(t);
 
@@ -329,7 +330,6 @@
     newBucket.sort((a,b)=> orderKey(seed, a.id) - orderKey(seed, b.id));
     revBucket.sort((a,b)=> orderKey(seed, a.id) - orderKey(seed, b.id));
 
-    // weave: review trước, xen kẽ new
     const mixed = [];
     let iN=0, iR=0;
     while (iN < newBucket.length || iR < revBucket.length) {
@@ -340,7 +340,6 @@
     return { list: mixed, newCount: todayNew.length, revCount: revBucket.length };
   };
 
-  // Khi tạo file => coi như “đã ôn chính thức”
   const advanceSchedule = (word, t) => {
     const tDay = ymdToDay(t);
     const dueDay = ymdToDay(word.nextDue);
@@ -354,26 +353,38 @@
     word.lastSeen = t;
   };
 
-  // ======= DAILY CYCLE (NEW, KHÔNG ĐỤNG SR) =======
+  // ======= DAILY CYCLE (NÂNG CẤP: KHÔNG QUA 00:00) =======
   const getCycleStartForDate = (t) => state.settings?.cycleStartByDate?.[t] || null;
 
-  const buildCycleFromStart = (startHHMM) => {
+  // Tạo 5 mốc trong ngày theo "shape" cũ nhưng scale vào khoảng [start..23:59]
+  const buildCycleWithinDay = (startHHMM) => {
     const startMin = timeToMin(startHHMM);
-    return CYCLE_OFFSETS_MIN.map(off => {
-      const total = startMin + off;
-      const dayPlus = Math.floor(total / 1440);
-      const label = minToHHMM(total);
-      return dayPlus ? `${label}(+${dayPlus})` : label;
+    const endMin = 1439; // 23:59
+    const available = Math.max(0, endMin - startMin);
+
+    // scale theo shape
+    const mins = SHAPE_OFFSETS_MIN.map(off => {
+      const frac = SHAPE_SPAN_MIN ? (off / SHAPE_SPAN_MIN) : 0;
+      return startMin + Math.round(frac * available);
     });
+
+    // đảm bảo không giảm dần + không vượt 23:59
+    for (let i = 1; i < mins.length; i++) {
+      if (mins[i] <= mins[i-1]) mins[i] = Math.min(mins[i-1] + 1, endMin);
+      else mins[i] = Math.min(mins[i], endMin);
+    }
+    mins[0] = Math.min(Math.max(mins[0], 0), endMin);
+
+    return mins.map(minToHHMM);
   };
 
   const getDailyCycle = (t) => {
     const s = getCycleStartForDate(t);
-    if (!s) return DEFAULT_DAILY_CYCLE.slice();
-    return buildCycleFromStart(s);
+    if (!s) return DEFAULT_DAILY_CYCLE.slice();     // không chọn -> giữ mốc cũ
+    return buildCycleWithinDay(s);                  // có chọn -> auto chia trong ngày (<=23:59)
   };
 
-  // ======= IN/PRINT (CỘT VIẾT RỘNG HƠN) =======
+  // ======= IN/PRINT =======
   const escapeHtml = (s) => (s ?? "").toString()
     .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
     .replaceAll('"',"&quot;").replaceAll("'","&#039;");
@@ -381,6 +392,7 @@
   const openPrintWindow = (t, list, cycle) => {
     const title = `Bài kiểm tra - ${t}`;
     const scheduleText = `Chu kỳ ngắt quãng hôm nay: ${cycle.join(" · ")}`;
+    const blankCount = 1 + cycle.length; // Học mới + các giờ
 
     const headCells = [
       "<th>Từ vựng</th>",
@@ -391,52 +403,105 @@
     ].join("");
 
     const rows = list.map(w => {
-      const blanks = Array.from({length: BLANK_COLS}, ()=>"<td></td>").join("");
+      const blanks = Array.from({ length: blankCount }, () => "<td></td>").join("");
       return `<tr>
-        <td>${escapeHtml(w.vocab)}</td>
-        <td>${escapeHtml(w.kana)}</td>
-        <td>${escapeHtml(w.meaning)}</td>
+        <td class="jp">${escapeHtml(w.vocab)}</td>
+        <td class="jp">${escapeHtml(w.kana)}</td>
+        <td class="vi">${escapeHtml(w.meaning)}</td>
         ${blanks}
       </tr>`;
     }).join("");
 
-    // Widths (blank 6 cột * 10% = 60%)
+    // cân cột
+    const vocabW = 14, kanaW = 12, meaningW = 22;
+    const remain = 100 - (vocabW + kanaW + meaningW);
+    const blankW = remain / blankCount;
+
+    const colgroup = `
+      <col style="width:${vocabW}%;">
+      <col style="width:${kanaW}%;">
+      <col style="width:${meaningW}%;">
+      ${Array.from({length: blankCount}, () => `<col style="width:${blankW.toFixed(2)}%;">`).join("")}
+    `;
+
     const html = `<!doctype html>
 <html lang="vi"><head><meta charset="utf-8" />
 <title>${escapeHtml(title)}</title>
 <style>
-  :root { font-family: Arial, "Noto Sans JP", sans-serif; font-size: 11px; }
-  @page { size: A4 landscape; margin: 10mm; }
-  h1 { margin: 0 0 4mm; font-size: 16px; }
-  .headerline{
-    margin: 0 0 4mm; font-size: 12px; padding: 8px 10px;
-    border: 1px solid #000; border-radius: 8px;
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    color: #000;
+    background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
-  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-  th, td { border: 1px solid #000; padding: 6px; vertical-align: top; }
-  th { font-weight: 700; }
-  td { height: 60px; }
-  .btn { margin-bottom: 6mm; }
+
+  @page { size: A4 landscape; margin: 7mm; }
+
+  .btn {
+    margin: 0 0 5mm;
+    padding: 10px 14px;
+    font-size: 16px;
+    font-family: "Times New Roman", Times, serif;
+  }
   @media print { .btn { display: none; } }
+
+  h1 {
+    margin: 0 0 3.5mm;
+    font-size: 20px;
+    font-family: "Times New Roman", Times, serif;
+  }
+
+  .headerline{
+    margin: 0 0 4mm;
+    font-size: 16px;
+    padding: 9px 11px;
+    border: 2px solid #000;
+    border-radius: 10px;
+    font-family: "Times New Roman", Times, serif;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 16px;
+  }
+
+  thead { display: table-header-group; }
+  tr { page-break-inside: avoid; }
+
+  th, td {
+    border: 1.4px solid #000;
+    padding: 6px;
+    vertical-align: top;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  th {
+    font-weight: 800;
+    font-family: "Times New Roman", Times, serif;
+    text-align: center;
+  }
+
+  td.jp { font-family: "Noto Sans JP", "Yu Gothic", "Hiragino Kaku Gothic ProN", Arial, sans-serif; }
+  td.vi { font-family: "Times New Roman", Times, serif; }
+
+  th:nth-child(n+4), td:nth-child(n+4) { text-align: center; }
+  td { height: 50px; }
 </style>
 </head>
 <body>
   <button class="btn" onclick="window.print()">In / Lưu PDF</button>
+
   <h1>${escapeHtml(title)}</h1>
   <div class="headerline"><b>${escapeHtml(scheduleText)}</b> • Tổng số từ: ${list.length}</div>
 
   <table>
-    <colgroup>
-      <col style="width:12%;">
-      <col style="width:10%;">
-      <col style="width:18%;">
-      <col style="width:10%;">
-      <col style="width:10%;">
-      <col style="width:10%;">
-      <col style="width:10%;">
-      <col style="width:10%;">
-      <col style="width:10%;">
-    </colgroup>
+    <colgroup>${colgroup}</colgroup>
     <thead><tr>${headCells}</tr></thead>
     <tbody>${rows}</tbody>
   </table>
@@ -475,7 +540,7 @@
   const historyBody = document.getElementById("historyBody");
   const clearLocalBtn = document.getElementById("clearLocalBtn");
 
-  // ======= PREVIEW HEADER/ROWS =======
+  // ======= PREVIEW =======
   const renderPreviewHeader = (cycle) => {
     const ths = [
       `<th style="width:12%;">Từ vựng</th>`,
@@ -487,9 +552,9 @@
     previewHeadRow.innerHTML = ths.join("");
   };
 
-  const renderPreview = (t, cycle) => {
+  const renderPreview = (t, cycle, listOverride = null) => {
     const pool = buildTodayPool(t);
-    const list = pool.list;
+    const list = listOverride || pool.list;
 
     if (list.length === 0) {
       previewBody.innerHTML = `<tr><td colspan="${4 + cycle.length}" class="muted">Chưa có từ nào để hiển thị.</td></tr>`;
@@ -507,7 +572,7 @@
     }).join("");
   };
 
-  // ======= HISTORY (NEW: EDIT/DELETE) =======
+  // ======= HISTORY =======
   let editingId = null;
 
   const getAllDatesDesc = () => {
@@ -583,20 +648,10 @@
     const action = btn.dataset.action;
     const id = btn.dataset.id;
     const d = historyDateSelect.value;
-
     if (!id) return;
 
-    if (action === "edit") {
-      editingId = id;
-      renderHistoryTable(d);
-      return;
-    }
-
-    if (action === "cancel") {
-      editingId = null;
-      renderHistoryTable(d);
-      return;
-    }
+    if (action === "edit") { editingId = id; renderHistoryTable(d); return; }
+    if (action === "cancel") { editingId = null; renderHistoryTable(d); return; }
 
     if (action === "save") {
       const tr = btn.closest("tr");
@@ -618,7 +673,7 @@
 
       save(state);
       editingId = null;
-      render(); // update preview + history
+      render();
       msg.innerHTML = `<span class="ok">Đã lưu chỉnh sửa.</span>`;
       return;
     }
@@ -638,7 +693,7 @@
     }
   });
 
-  // ======= CLEAR LOCAL (RESET LOGIC NGAY) =======
+  // ======= CLEAR LOCAL =======
   clearLocalBtn.addEventListener("click", () => {
     const ok = window.confirm("Xóa toàn bộ dữ liệu local trên máy này? (Không thể hoàn tác)");
     if (!ok) return;
@@ -703,15 +758,13 @@
 
     recomputeStartDate();
     save(state);
-
-    // NEW: tự xóa ô nhập sau khi thêm hàng loạt
     bulkText.value = "";
 
     msg.innerHTML = `<span class="ok">Đã thêm ${added} từ (còn thiếu ${DAILY_NEW_LIMIT - countNewOnDate(t)} từ để đủ 50).</span>`;
     render();
   });
 
-  // ======= START TIME BUTTONS (NEW) =======
+  // ======= START TIME =======
   applyStartTimeBtn.addEventListener("click", () => {
     const t = todayStr();
     const v = (startTimeInput.value || "").trim();
@@ -733,16 +786,35 @@
     msg.innerHTML = `<span class="ok">Đã về mốc cố định mặc định.</span>`;
   });
 
-  // ======= GENERATE =======
+  // ======= GENERATE / REPRINT (đổi giờ -> đổi cột giờ, KHÔNG đổi thứ tự từ) =======
   genBtn.addEventListener("click", () => {
     const t = todayStr();
+    const snap = state.generatedByDate?.[t];
+
+    if (snap) {
+      const cycle = getDailyCycle(t); // lấy giờ hiện tại
+      const ids = snap.ids || [];
+      const list = ids.map(id => state.words.find(w => w.id === id)).filter(Boolean).map(normalizeWord);
+
+      if (list.length === 0) {
+        msg.innerHTML = `<span class="err">Không tìm thấy dữ liệu đề đã tạo (có thể bạn đã xóa từ). Nếu muốn tạo lại, hãy nhập đủ 50 từ.</span>`;
+        return;
+      }
+
+      const ok = openPrintWindow(t, list, cycle);
+      if (!ok) {
+        msg.innerHTML = `<span class="err">Trình duyệt chặn pop-up. Hãy cho phép pop-up rồi bấm lại.</span>`;
+        return;
+      }
+      msg.innerHTML = `<span class="ok">Đang in lại đề (cột giờ đã cập nhật, không cập nhật SR).</span>`;
+      return;
+    }
+
     const newCount = countNewOnDate(t);
     if (newCount < DAILY_NEW_LIMIT) return;
-    if (state.lastGeneratedDate === t) return;
 
     const pool = buildTodayPool(t);
     const list = pool.list;
-
     const cycle = getDailyCycle(t);
 
     const ok = openPrintWindow(t, list, cycle);
@@ -758,6 +830,7 @@
     }
 
     state.lastGeneratedDate = t;
+    state.generatedByDate[t] = { ids: list.map(w => w.id) }; // chỉ lưu ids để giữ thứ tự từ
     save(state);
     render();
   });
@@ -771,6 +844,7 @@
     const dueCount = dueCountOnDate(t);
     const pool = buildTodayPool(t);
 
+    const snap = state.generatedByDate?.[t] || null;
     const cycle = getDailyCycle(t);
 
     todayPill.textContent = `Hôm nay: ${t}`;
@@ -780,29 +854,114 @@
     totalPill.textContent = `Tổng từ đã lưu: ${state.words.length}`;
 
     bulkAddBtn.disabled = newCount >= DAILY_NEW_LIMIT;
-    genBtn.disabled = !(newCount >= DAILY_NEW_LIMIT && state.lastGeneratedDate !== t);
 
-    // Start time UI sync
+    genBtn.textContent = snap ? "In lại đề hôm nay" : "Tạo file kiểm tra hôm nay";
+    genBtn.disabled = snap ? false : (newCount < DAILY_NEW_LIMIT);
+
     const start = getCycleStartForDate(t);
     startTimeInput.value = start || "";
+
     startTimeHint.textContent = start
-      ? `Đang dùng giờ bắt đầu hôm nay: ${start} → mốc: ${cycle.join(" · ")}`
+      ? `Giờ bắt đầu: ${start} → mốc trong ngày: ${cycle.join(" · ")} (<= 23:59)`
       : `Đang dùng mốc cố định: ${DEFAULT_DAILY_CYCLE.join(" · ")}`;
 
     scheduleHeader.innerHTML = `<b>Chu kỳ ngắt quãng:</b> ${cycle.map(escapeHtml).join(" · ")}`;
 
-    if (newCount < DAILY_NEW_LIMIT) {
+    if (snap) {
+      msg.innerHTML = `<span class="ok">Đã tạo đề hôm nay. Bạn có thể đổi giờ bắt đầu rồi bấm “In lại” (cột giờ đổi, thứ tự từ giữ nguyên).</span>`;
+    } else if (newCount < DAILY_NEW_LIMIT) {
       msg.innerHTML = `<span class="warn">Bắt buộc nhập đủ ${DAILY_NEW_LIMIT} từ mới trong ngày để được tạo file.</span>`;
-    } else if (state.lastGeneratedDate === t) {
-      msg.innerHTML = `<span class="ok">Đã tạo file kiểm tra cho hôm nay (lịch ôn đã cập nhật theo SR).</span>`;
     } else {
       msg.innerHTML = `<span class="ok">Đã đủ ${DAILY_NEW_LIMIT} từ mới. Bảng hôm nay trộn: mới ${pool.newCount} • ôn ${pool.revCount}.</span>`;
     }
 
-    renderPreviewHeader(cycle);
-    renderPreview(t, cycle);
-    renderHistorySelect();
+    const listForPreview = snap
+      ? (snap.ids || []).map(id => state.words.find(w => w.id === id)).filter(Boolean).map(normalizeWord)
+      : null;
+
+    // preview header
+    const ths = [
+      `<th style="width:12%;">Từ vựng</th>`,
+      `<th style="width:10%;">Kana</th>`,
+      `<th style="width:18%;">Nghĩa Việt</th>`,
+      `<th style="width:10%;">Học mới</th>`,
+      ...cycle.map(h => `<th style="width:10%;">${escapeHtml(h)}</th>`)
+    ];
+    previewHeadRow.innerHTML = ths.join("");
+
+    // preview body
+    const list = listForPreview || pool.list;
+    if (list.length === 0) {
+      previewBody.innerHTML = `<tr><td colspan="${4 + cycle.length}" class="muted">Chưa có từ nào để hiển thị.</td></tr>`;
+    } else {
+      previewBody.innerHTML = list.map(w => {
+        const blanks = Array.from({length: BLANK_COLS}, ()=>`<td class="blank"></td>`).join("");
+        return `<tr>
+          <td>${escapeHtml(w.vocab)}</td>
+          <td>${escapeHtml(w.kana)}</td>
+          <td>${escapeHtml(w.meaning)}</td>
+          ${blanks}
+        </tr>`;
+      }).join("");
+    }
+
+    // history
+    const dates = (() => {
+      const set = new Set(state.words.map(w => w.addedDate));
+      return Array.from(set).sort((a,b)=> ymdToDay(b) - ymdToDay(a));
+    })();
+
+    if (dates.length === 0) {
+      historyDateSelect.innerHTML = `<option value="">(Chưa có dữ liệu)</option>`;
+      historyBody.innerHTML = `<tr><td colspan="4" class="muted">Chưa có từ nào được lưu.</td></tr>`;
+    } else {
+      const current = historyDateSelect.value || dates[0];
+      historyDateSelect.innerHTML = dates.map(d => {
+        const n = countNewOnDate(d);
+        return `<option value="${d}" ${d===current?"selected":""}>${d} — ${n} từ</option>`;
+      }).join("");
+
+      const d = historyDateSelect.value || dates[0];
+      const rows = state.words.filter(w => w.addedDate === d).map(normalizeWord);
+      if (rows.length === 0) {
+        historyBody.innerHTML = `<tr><td colspan="4" class="muted">Không có từ nào trong ngày này.</td></tr>`;
+      } else {
+        historyBody.innerHTML = rows.map(w => {
+          const isEdit = (editingId === w.id);
+          if (isEdit) {
+            return `
+              <tr data-id="${escapeHtml(w.id)}">
+                <td><input class="editVocab" value="${escapeHtml(w.vocab)}" /></td>
+                <td><input class="editKana" value="${escapeHtml(w.kana)}" /></td>
+                <td><input class="editMeaning" value="${escapeHtml(w.meaning)}" /></td>
+                <td>
+                  <button class="btnMini" data-action="save" data-id="${escapeHtml(w.id)}">Lưu</button>
+                  <button class="btnMini" data-action="cancel" data-id="${escapeHtml(w.id)}">Hủy</button>
+                </td>
+              </tr>
+            `;
+          }
+          return `
+            <tr data-id="${escapeHtml(w.id)}">
+              <td>${escapeHtml(w.vocab)}</td>
+              <td>${escapeHtml(w.kana)}</td>
+              <td>${escapeHtml(w.meaning)}</td>
+              <td>
+                <button class="btnMini" data-action="edit" data-id="${escapeHtml(w.id)}">Sửa</button>
+                <button class="btnMini danger" data-action="delete" data-id="${escapeHtml(w.id)}">Xóa</button>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      }
+    }
   };
+
+  // history select change
+  historyDateSelect.addEventListener("change", () => {
+    editingId = null;
+    render();
+  });
 
   render();
 })();
